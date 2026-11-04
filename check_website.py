@@ -1,9 +1,11 @@
+
 import time
 from datetime import datetime, timezone
 
 import httpx
 
 from database import create_table, save_check
+from circuit_breaker import CircuitBreaker
 
 
 url = "http://127.0.0.1:8000"
@@ -11,21 +13,40 @@ url = "http://127.0.0.1:8000"
 max_attempts = 3
 check_interval = 60
 
+# Create one circuit breaker for the monitor.
+breaker = CircuitBreaker(
+    failure_threshold=5,
+    recovery_timeout=60
+)
+
 
 def check_website():
+
     print(f"\nChecking website: {url}")
     print(f"Check started at: {time.strftime('%H:%M:%S')}")
+
+    # Ask the circuit breaker whether a request is allowed.
+    if not breaker.allow_request():
+        print("Website check skipped because the circuit is OPEN.")
+        return
 
     final_status = "DOWN"
     response_time = None
     http_status_code = None
     attempts_used = 0
 
-    for attempt in range(1, max_attempts + 1):
+    # In HALF-OPEN, allow only one attempt as a recovery probe.
+    if breaker.state == "HALF-OPEN":
+        attempts_limit = 1
+        print("Recovery probe: retries disabled.")
+    else:
+        attempts_limit = max_attempts
+
+    for attempt in range(1, attempts_limit + 1):
 
         attempts_used = attempt
 
-        print(f"\nAttempt {attempt} of {max_attempts}")
+        print(f"\nAttempt {attempt} of {attempts_limit}")
 
         start_time = time.time()
 
@@ -64,7 +85,7 @@ def check_website():
             print(f"Request failed: {type(error).__name__}")
             print(f"Time spent: {response_time:.2f} seconds")
 
-            if attempt == max_attempts:
+            if attempt == attempts_limit:
                 print("Reachability: UNREACHABLE")
                 print("All attempts failed.")
                 break
@@ -73,6 +94,12 @@ def check_website():
 
             print(f"Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
+
+    # Record one result for the entire monitoring cycle.
+    if final_status == "UP":
+        breaker.record_success()
+    else:
+        breaker.record_failure()
 
     checked_at = datetime.now(timezone.utc).isoformat()
 
@@ -87,12 +114,15 @@ def check_website():
 
     print(f"\nFinal status: {final_status}")
     print("Monitoring result saved to database.")
+    print(f"Circuit breaker state: {breaker.state}")
 
 
 create_table()
 
 while True:
+
     check_website()
 
     print(f"\nNext check in {check_interval} seconds.")
+
     time.sleep(check_interval)

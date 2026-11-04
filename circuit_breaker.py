@@ -1,3 +1,4 @@
+
 import time
 
 
@@ -10,6 +11,7 @@ class CircuitBreaker:
         self.failure_count = 0
         self.state = "CLOSED"
         self.opened_at = None
+        self.probe_in_progress = False
 
     def allow_request(self):
 
@@ -22,6 +24,8 @@ class CircuitBreaker:
 
             if elapsed_time >= self.recovery_timeout:
                 self.state = "HALF-OPEN"
+                self.probe_in_progress = True
+
                 print("Circuit breaker: HALF-OPEN")
                 return True
 
@@ -29,31 +33,47 @@ class CircuitBreaker:
             return False
 
         if self.state == "HALF-OPEN":
+
+            if self.probe_in_progress:
+                print("Circuit breaker: Recovery test already in progress")
+                return False
+
+            self.probe_in_progress = True
             return True
+
+        return False
 
     def record_success(self):
 
         self.failure_count = 0
         self.state = "CLOSED"
         self.opened_at = None
+        self.probe_in_progress = False
 
         print("Circuit breaker: CLOSED - Website recovered")
 
     def record_failure(self):
 
+        # A failed recovery probe immediately reopens the circuit.
+        # It does not increase the normal failure counter.
+        if self.state == "HALF-OPEN":
+
+            print("Recovery probe failed.")
+
+            self.open_circuit()
+            return
+
         self.failure_count += 1
 
         print(f"Consecutive failures: {self.failure_count}")
 
-        if self.state == "HALF-OPEN":
-            self.open_circuit()
-
-        elif self.failure_count >= self.failure_threshold:
+        if self.failure_count >= self.failure_threshold:
             self.open_circuit()
 
     def open_circuit(self):
 
         self.state = "OPEN"
         self.opened_at = time.time()
+        self.probe_in_progress = False
 
         print("Circuit breaker: OPEN - Too many failures")
