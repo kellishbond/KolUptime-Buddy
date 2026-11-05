@@ -1,3 +1,4 @@
+
 import sqlite3
 from pathlib import Path
 
@@ -17,6 +18,22 @@ def create_table():
                 attempts INTEGER NOT NULL
             )
         """)
+
+
+def get_last_status(website_url):
+    with sqlite3.connect(DATABASE_FILE) as connection:
+        result = connection.execute("""
+            SELECT status
+            FROM check_history
+            WHERE website_url = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (website_url,)).fetchone()
+
+    if result is None:
+        return None
+
+    return result[0]
 
 
 def save_check(

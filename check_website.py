@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from database import create_table, save_check
+from database import create_table, save_check, get_last_status
 from circuit_breaker import CircuitBreaker
 
 
@@ -13,11 +13,24 @@ url = "http://127.0.0.1:8000"
 max_attempts = 3
 check_interval = 60
 
-# Create one circuit breaker for the monitor.
 breaker = CircuitBreaker(
     failure_threshold=5,
     recovery_timeout=60
 )
+
+
+def send_alert(previous_status, current_status):
+
+    if previous_status == current_status:
+        return
+
+    if previous_status == "UP" and current_status == "DOWN":
+        print("\n🚨 ALERT: Website is DOWN!")
+        print(f"Website: {url}")
+
+    elif previous_status == "DOWN" and current_status == "UP":
+        print("\n✅ RECOVERY: Website is back UP!")
+        print(f"Website: {url}")
 
 
 def check_website():
@@ -25,7 +38,6 @@ def check_website():
     print(f"\nChecking website: {url}")
     print(f"Check started at: {time.strftime('%H:%M:%S')}")
 
-    # Ask the circuit breaker whether a request is allowed.
     if not breaker.allow_request():
         print("Website check skipped because the circuit is OPEN.")
         return
@@ -35,7 +47,6 @@ def check_website():
     http_status_code = None
     attempts_used = 0
 
-    # In HALF-OPEN, allow only one attempt as a recovery probe.
     if breaker.state == "HALF-OPEN":
         attempts_limit = 1
         print("Recovery probe: retries disabled.")
@@ -95,11 +106,14 @@ def check_website():
             print(f"Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
 
-    # Record one result for the entire monitoring cycle.
+    # Update the circuit breaker.
     if final_status == "UP":
         breaker.record_success()
     else:
         breaker.record_failure()
+
+    # Retrieve the previous status before saving this check.
+    previous_status = get_last_status(url)
 
     checked_at = datetime.now(timezone.utc).isoformat()
 
@@ -111,6 +125,12 @@ def check_website():
         http_status_code=http_status_code,
         attempts=attempts_used
     )
+
+    # Notify only when the website changes status.
+    if previous_status is None:
+        print(f"\nInitial monitoring status: {final_status}")
+    else:
+        send_alert(previous_status, final_status)
 
     print(f"\nFinal status: {final_status}")
     print("Monitoring result saved to database.")

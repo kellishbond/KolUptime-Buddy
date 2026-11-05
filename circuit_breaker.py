@@ -45,12 +45,15 @@ class CircuitBreaker:
 
     def record_success(self):
 
+        previous_state = self.state
+
         self.failure_count = 0
         self.state = "CLOSED"
         self.opened_at = None
         self.probe_in_progress = False
 
-        print("Circuit breaker: CLOSED - Website recovered")
+        if previous_state != "CLOSED":
+            print("Circuit breaker: CLOSED - Website recovered")
 
     def record_failure(self):
 
